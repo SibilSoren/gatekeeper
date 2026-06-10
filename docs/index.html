@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gatekeeper — Production-grade Rate Limiting for Express</title>
+  <meta name="description" content="3 algorithms. Redis-backed. Fail-open. The rate limiter your Express API deserves." />
+  <meta name="keywords" content="rate limiter, express middleware, redis, token bucket, sliding window, api security, nodejs" />
+  <meta name="author" content="SibilSoren" />
+
+  <meta property="og:title" content="Gatekeeper" />
+  <meta property="og:description" content="Production-grade rate limiting middleware for Express." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://sibilsoren.github.io/gatekeeper/" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Mesh gradient background -->
+  <div class="mesh-bg"></div>
+
+  <!-- Nav -->
+  <nav class="nav" id="nav">
+    <div class="nav-inner">
+      <a href="#" class="nav-logo">
+        <span class="shield-icon">🛡️</span>
+        gatekeeper
+      </a>
+      <div class="nav-links">
+        <a href="#algorithms">Algorithms</a>
+        <a href="#usage">Usage</a>
+        <a href="#options">Options</a>
+        <a href="https://github.com/SibilSoren/gatekeeper" target="_blank" rel="noopener" class="nav-cta">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+          GitHub
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero — Split Layout -->
+  <section class="hero">
+    <div class="hero-left">
+      <div class="hero-tag">
+        <span class="tag-pulse"></span>
+        Open Source · MIT License
+      </div>
+      <h1>Protect your API.<br/><span class="text-gradient">Every request.</span></h1>
+      <p class="hero-desc">
+        Production-grade rate limiting middleware for Express.<br/>
+        3 algorithms. Redis-backed. Fail-open. Zero config to start.
+      </p>
+      <div class="hero-stats">
+        <div class="stat">
+          <span class="stat-number">3</span>
+          <span class="stat-label">Algorithms</span>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat">
+          <span class="stat-number">27</span>
+          <span class="stat-label">Tests</span>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat">
+          <span class="stat-number">0</span>
+          <span class="stat-label">Runtime Deps</span>
+        </div>
+      </div>
+      <div class="hero-buttons">
+        <a href="#usage" class="btn-warm">Get Started</a>
+        <a href="https://github.com/SibilSoren/gatekeeper" target="_blank" rel="noopener" class="btn-outline">View Source →</a>
+      </div>
+    </div>
+    <div class="hero-right">
+      <div class="code-card">
+        <div class="code-header">
+          <div class="code-dots">
+            <span></span><span></span><span></span>
+          </div>
+          <span class="code-filename">server.ts</span>
+        </div>
+        <pre class="code-body"><span class="kw">import</span> express <span class="kw">from</span> <span class="str">'express'</span>;
+<span class="kw">import</span> { gatekeeper } <span class="kw">from</span> <span class="str">'@sibilsoren/gatekeeper'</span>;
+
+<span class="kw">const</span> app = <span class="fn">express</span>();
+
+<span class="cmt">// 100 requests/min per IP</span>
+app.<span class="fn">use</span>(<span class="fn">gatekeeper</span>());
+
+<span class="cmt">// Strict auth limits</span>
+app.<span class="fn">post</span>(<span class="str">'/auth/login'</span>, <span class="fn">gatekeeper</span>({
+  limit: <span class="num">5</span>,
+  window: <span class="str">'15m'</span>,
+}));
+
+app.<span class="fn">listen</span>(<span class="num">3000</span>);</pre>
+      </div>
+      <!-- Floating response card -->
+      <div class="response-card float-card">
+        <div class="response-status">
+          <span class="status-dot red"></span>
+          429 Too Many Requests
+        </div>
+        <pre class="response-body">{
+  <span class="key">"error"</span>: <span class="str">"Too Many Requests"</span>,
+  <span class="key">"retryAfter"</span>: <span class="num">30</span>
+}</pre>
+      </div>
+      <!-- Floating header card -->
+      <div class="header-card float-card">
+        <div class="header-title">Response Headers</div>
+        <div class="header-row"><span class="header-key">X-RateLimit-Limit:</span> 100</div>
+        <div class="header-row"><span class="header-key">X-RateLimit-Remaining:</span> 42</div>
+        <div class="header-row"><span class="header-key">Retry-After:</span> 30</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Algorithms -->
+  <section class="section" id="algorithms">
+    <div class="container">
+      <span class="section-eyebrow">Algorithms</span>
+      <h2 class="section-heading">Choose your strategy.</h2>
+      <p class="section-desc">Three battle-tested algorithms. Pick the right one for your use case.</p>
+
+      <div class="algo-grid">
+        <!-- Sliding Window -->
+        <div class="algo-card algo-featured">
+          <div class="algo-badge">Default</div>
+          <div class="algo-icon">📊</div>
+          <h3>Sliding Window Counter</h3>
+          <p>Prevents boundary burst attacks by weighting the previous window. Best accuracy-to-memory ratio.</p>
+          <div class="algo-visual">
+            <div class="window-bar">
+              <div class="window-prev">
+                <span>Prev: 70 req</span>
+                <div class="bar" style="width: 70%"></div>
+              </div>
+              <div class="window-curr">
+                <span>Curr: 20 req</span>
+                <div class="bar" style="width: 20%"></div>
+              </div>
+            </div>
+            <div class="algo-formula">Weighted = 70 × 75% + 20 = <strong>72</strong></div>
+          </div>
+          <div class="algo-meta">
+            <span>✅ Best for most APIs</span>
+            <span>📦 2 counters/client</span>
+          </div>
+        </div>
+
+        <!-- Fixed Window -->
+        <div class="algo-card">
+          <div class="algo-icon">🪟</div>
+          <h3>Fixed Window</h3>
+          <p>The simplest approach. Resets the counter at each window boundary. Fast and memory-efficient.</p>
+          <div class="algo-visual">
+            <div class="fixed-windows">
+              <div class="fw">
+                <div class="fw-fill" style="width: 80%"></div>
+                <span>80/100</span>
+              </div>
+              <div class="fw">
+                <div class="fw-fill full" style="width: 100%"></div>
+                <span>🚫 100/100</span>
+              </div>
+              <div class="fw">
+                <div class="fw-fill" style="width: 20%"></div>
+                <span>20/100</span>
+              </div>
+            </div>
+          </div>
+          <div class="algo-meta">
+            <span>⚡ Fastest</span>
+            <span>📦 1 counter/client</span>
+          </div>
+        </div>
+
+        <!-- Token Bucket -->
+        <div class="algo-card">
+          <div class="algo-icon">🪣</div>
+          <h3>Token Bucket</h3>
+          <p>Allows controlled bursts. Tokens refill at a steady rate. Perfect for API billing and throttling.</p>
+          <div class="algo-visual">
+            <div class="bucket-visual">
+              <div class="bucket">
+                <div class="bucket-tokens" id="bucket-tokens">
+                  <span class="token">🪙</span>
+                  <span class="token">🪙</span>
+                  <span class="token">🪙</span>
+                  <span class="token">🪙</span>
+                  <span class="token dim">🪙</span>
+                  <span class="token dim">🪙</span>
+                </div>
+              </div>
+              <div class="bucket-label">4/6 tokens · refills 2/sec</div>
+            </div>
+          </div>
+          <div class="algo-meta">
+            <span>💰 Great for billing</span>
+            <span>🔀 Variable cost</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Usage -->
+  <section class="section section-alt" id="usage">
+    <div class="container">
+      <span class="section-eyebrow">Usage</span>
+      <h2 class="section-heading">From zero to protected in 30 seconds.</h2>
+
+      <div class="usage-grid">
+        <div class="usage-step">
+          <div class="step-marker">01</div>
+          <h3>Install</h3>
+          <div class="code-inline">
+            <code>npm install @sibilsoren/gatekeeper</code>
+            <button class="copy-btn" onclick="copyText(this, 'npm install @sibilsoren/gatekeeper')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+          </div>
+          <p class="step-note">For Redis support, also install <code>ioredis</code></p>
+        </div>
+
+        <div class="usage-step">
+          <div class="step-marker">02</div>
+          <h3>Add middleware</h3>
+          <div class="code-card small">
+            <pre class="code-body"><span class="kw">import</span> { gatekeeper } <span class="kw">from</span> <span class="str">'@sibilsoren/gatekeeper'</span>;
+
+<span class="cmt">// That's it. Zero config works.</span>
+app.<span class="fn">use</span>(<span class="fn">gatekeeper</span>());</pre>
+          </div>
+        </div>
+
+        <div class="usage-step">
+          <div class="step-marker">03</div>
+          <h3>Customize per route</h3>
+          <div class="code-card small">
+            <pre class="code-body"><span class="cmt">// Strict for auth</span>
+app.<span class="fn">post</span>(<span class="str">'/auth'</span>, <span class="fn">gatekeeper</span>({
+  limit: <span class="num">5</span>, window: <span class="str">'15m'</span>
+}));
+
+<span class="cmt">// Generous for reads</span>
+app.<span class="fn">use</span>(<span class="str">'/api'</span>, <span class="fn">gatekeeper</span>({
+  limit: <span class="num">1000</span>, window: <span class="str">'1m'</span>
+}));</pre>
+          </div>
+        </div>
+
+        <div class="usage-step">
+          <div class="step-marker">04</div>
+          <h3>Scale with Redis</h3>
+          <div class="code-card small">
+            <pre class="code-body"><span class="kw">import</span> { RedisStore } <span class="kw">from</span> <span class="str">'@sibilsoren/gatekeeper'</span>;
+<span class="kw">import</span> Redis <span class="kw">from</span> <span class="str">'ioredis'</span>;
+
+app.<span class="fn">use</span>(<span class="fn">gatekeeper</span>({
+  store: <span class="kw">new</span> <span class="fn">RedisStore</span>(<span class="kw">new</span> <span class="fn">Redis</span>()),
+}));</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="section" id="features">
+    <div class="container">
+      <span class="section-eyebrow">Why Gatekeeper</span>
+      <h2 class="section-heading">Built for production. Not for demos.</h2>
+
+      <div class="features-row">
+        <div class="feature-pill">
+          <span class="pill-icon">🛡️</span>
+          <div>
+            <strong>Fail-Open</strong>
+            <p>Redis down? Requests still flow. Your API stays up.</p>
+          </div>
+        </div>
+        <div class="feature-pill">
+          <span class="pill-icon">⚛️</span>
+          <div>
+            <strong>Atomic Operations</strong>
+            <p>Lua scripts in Redis prevent race conditions. No double-counting.</p>
+          </div>
+        </div>
+        <div class="feature-pill">
+          <span class="pill-icon">📊</span>
+          <div>
+            <strong>Standard Headers</strong>
+            <p>X-RateLimit-Limit, Remaining, Reset, and Retry-After on every response.</p>
+          </div>
+        </div>
+        <div class="feature-pill">
+          <span class="pill-icon">🎯</span>
+          <div>
+            <strong>Flexible Keys</strong>
+            <p>Rate limit by IP, API key, user ID, or any custom function.</p>
+          </div>
+        </div>
+        <div class="feature-pill">
+          <span class="pill-icon">🪶</span>
+          <div>
+            <strong>Zero Dependencies</strong>
+            <p>No runtime deps. ioredis is an optional peer dependency.</p>
+          </div>
+        </div>
+        <div class="feature-pill">
+          <span class="pill-icon">📦</span>
+          <div>
+            <strong>Dual ESM + CJS</strong>
+            <p>Works everywhere. TypeScript types included.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Options Table -->
+  <section class="section section-alt" id="options">
+    <div class="container">
+      <span class="section-eyebrow">Configuration</span>
+      <h2 class="section-heading">Every knob you need.</h2>
+
+      <div class="table-wrapper">
+        <table class="options-table">
+          <thead>
+            <tr>
+              <th>Option</th>
+              <th>Type</th>
+              <th>Default</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>limit</code></td><td>number</td><td>100</td><td>Max requests per window</td></tr>
+            <tr><td><code>window</code></td><td>string | number</td><td>"1m"</td><td>Window size ("30s", "5m", "1h", or ms)</td></tr>
+            <tr><td><code>algorithm</code></td><td>string</td><td>"sliding-window"</td><td>"fixed-window" | "sliding-window" | "token-bucket"</td></tr>
+            <tr><td><code>store</code></td><td>Store</td><td>MemoryStore</td><td>Storage backend (MemoryStore or RedisStore)</td></tr>
+            <tr><td><code>keyGenerator</code></td><td>function</td><td>req.ip</td><td>Generate rate limit key from request</td></tr>
+            <tr><td><code>skip</code></td><td>function</td><td>() => false</td><td>Skip rate limiting for certain requests</td></tr>
+            <tr><td><code>message</code></td><td>string</td><td>"Too Many Requests"</td><td>Custom error message</td></tr>
+            <tr><td><code>headers</code></td><td>boolean</td><td>true</td><td>Include X-RateLimit-* headers</td></tr>
+            <tr><td><code>capacity</code></td><td>number</td><td>100</td><td>Token bucket capacity</td></tr>
+            <tr><td><code>refillRate</code></td><td>number</td><td>10</td><td>Tokens per second (token bucket)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="section cta-section">
+    <div class="container">
+      <div class="cta-box">
+        <h2>Your API deserves better<br/>than <code>express-rate-limit</code>.</h2>
+        <p>Distributed. Atomic. Fail-open. Production-ready.</p>
+        <div class="code-inline cta-install">
+          <code>npm install @sibilsoren/gatekeeper</code>
+        </div>
+        <div class="cta-actions">
+          <a href="https://github.com/SibilSoren/gatekeeper" target="_blank" rel="noopener" class="btn-warm">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            Star on GitHub
+          </a>
+          <a href="https://github.com/SibilSoren/gatekeeper/blob/main/ROADMAP.md" target="_blank" rel="noopener" class="btn-outline">Roadmap →</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-row">
+        <p>Built by <a href="https://github.com/SibilSoren" target="_blank" rel="noopener">SibilSoren</a></p>
+        <p class="footer-links">
+          <a href="https://github.com/SibilSoren/gatekeeper/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contribute</a>
+          <span>·</span>
+          <a href="https://github.com/SibilSoren/gatekeeper/blob/main/ROADMAP.md" target="_blank" rel="noopener">Roadmap</a>
+          <span>·</span>
+          <span>MIT License</span>
+        </p>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    function copyText(btn, text) {
+      navigator.clipboard.writeText(text).then(() => {
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+        setTimeout(() => {
+          btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+        }, 2000);
+      });
+    }
+
+    // Scroll nav
+    window.addEventListener('scroll', () => {
+      document.getElementById('nav').classList.toggle('scrolled', window.scrollY > 50);
+    });
+
+    // Scroll reveal
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(e => e.isIntersecting && e.target.classList.add('revealed'));
+    }, { threshold: 0.1 });
+
+    document.querySelectorAll('.algo-card, .usage-step, .feature-pill').forEach(el => observer.observe(el));
+  </script>
+</body>
+</html>
