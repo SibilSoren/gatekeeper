@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="docs/assets/logo.png" alt="Gatekeeper Logo" width="120" />
+</div>
+
 # @sibilsoren/gatekeeper
 
 [![npm version](https://img.shields.io/npm/v/@sibilsoren/gatekeeper.svg)](https://www.npmjs.com/package/@sibilsoren/gatekeeper)
