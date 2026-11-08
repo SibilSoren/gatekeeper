@@ -91,6 +91,14 @@ end
 return {allowed, math.floor(tokens), wait_ms}
 `;
 
+export interface RedisStoreOptions {
+  /**
+   * Fail open if Redis hasn't answered within this many milliseconds
+   * (default: 500). Bounds the latency a slow or unreachable Redis can add.
+   */
+  timeoutMs?: number;
+}
+
 /**
  * Redis-backed store for distributed rate limiting.
  * Uses Lua scripts for atomic operations.
@@ -100,12 +108,15 @@ export class RedisStore implements Store {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private client: any;
   private connected = false;
+  private timeoutMs: number;
 
   /**
-   * @param client - An ioredis client instance or connection string
+   * @param client - An ioredis client instance
+   * @param options - See {@link RedisStoreOptions}
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  constructor(client: any) {
+  constructor(client: any, options: RedisStoreOptions = {}) {
+    this.timeoutMs = options.timeoutMs ?? 500;
     if (typeof client === 'string') {
       // Dynamically import ioredis
       throw new Error(
@@ -126,12 +137,12 @@ export class RedisStore implements Store {
   }
 
   async increment(key: string, windowMs: number): Promise<WindowResult> {
-    if (!this.connected) {
+    if (!this.isAvailable()) {
       return this.failOpen(windowMs);
     }
 
     try {
-      const result = await this.client.eval(
+      const result = await this.evalWithTimeout(
         FIXED_WINDOW_SCRIPT,
         1,
         key,
@@ -152,7 +163,7 @@ export class RedisStore implements Store {
     key: string,
     windowMs: number,
   ): Promise<WindowResult> {
-    if (!this.connected) {
+    if (!this.isAvailable()) {
       return this.failOpen(windowMs);
     }
 
@@ -165,7 +176,7 @@ export class RedisStore implements Store {
       const currentKey = `${key}:${currentWindowIndex}`;
       const previousKey = `${key}:${previousWindowIndex}`;
 
-      const result = await this.client.eval(
+      const result = await this.evalWithTimeout(
         SLIDING_WINDOW_SCRIPT,
         2,
         currentKey,
@@ -175,11 +186,9 @@ export class RedisStore implements Store {
         windowStart,
       );
 
-      const count = Number(result[0]);
-      const ttl = Number(result[1]);
-      const resetMs = Date.now() + ttl;
-
-      return { count, resetMs };
+      // The window resets when the current one ends. The key's TTL can't be
+      // used here: it's two windows long so the next window can still read it.
+      return { count: Number(result[0]), resetMs: windowStart + windowMs };
     } catch {
       return this.failOpen(windowMs);
     }
@@ -190,13 +199,13 @@ export class RedisStore implements Store {
     capacity: number,
     refillRate: number,
   ): Promise<TokenBucketResult> {
-    if (!this.connected) {
+    if (!this.isAvailable()) {
       return { allowed: true, remaining: capacity, resetMs: Date.now() };
     }
 
     try {
       const now = Date.now();
-      const result = await this.client.eval(
+      const result = await this.evalWithTimeout(
         TOKEN_BUCKET_SCRIPT,
         1,
         key,
@@ -220,7 +229,7 @@ export class RedisStore implements Store {
   }
 
   async reset(key: string): Promise<void> {
-    if (!this.connected) return;
+    if (!this.isAvailable()) return;
 
     try {
       // Find and delete all keys matching the pattern
@@ -238,6 +247,40 @@ export class RedisStore implements Store {
       await this.client.quit();
     }
     this.connected = false;
+  }
+
+  /**
+   * False once the connection has been lost. While ioredis reconnects it
+   * queues commands and only rejects them after maxRetriesPerRequest, about
+   * 10 seconds by default, so sending one then would stall the request.
+   * The first connect is not treated as down: commands queued then are sent
+   * as soon as it connects, and evalWithTimeout bounds the wait if it never does.
+   */
+  private isAvailable(): boolean {
+    if (typeof this.client.status === 'string') {
+      return !['reconnecting', 'close', 'end'].includes(this.client.status);
+    }
+    return this.connected;
+  }
+
+  /**
+   * Run a script, but give up after timeoutMs. Covers a command that was
+   * already in flight when Redis went away, and a Redis that is just slow.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async evalWithTimeout(...args: unknown[]): Promise<any> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error('Redis did not answer in time')),
+        this.timeoutMs,
+      );
+    });
+    try {
+      return await Promise.race([this.client.eval(...args), timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**
