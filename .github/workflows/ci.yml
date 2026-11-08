@@ -14,6 +14,19 @@ jobs:
       matrix:
         node-version: [20, 22]
 
+    # A real Redis-compatible server, so the RedisStore tests run the Lua
+    # scripts on every push instead of being skipped.
+    services:
+      redis:
+        image: valkey/valkey:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+
     steps:
       - uses: actions/checkout@v4
 
@@ -34,3 +47,5 @@ jobs:
 
       - name: Test
         run: npm test
+        env:
+          REDIS_URL: redis://localhost:6379
