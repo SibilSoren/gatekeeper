@@ -77,6 +77,8 @@ app.use(gatekeeper({
 }));
 ```
 
+In both window algorithms a blocked request still counts toward the window, so a client that keeps retrying stays blocked until it slows down. Token Bucket works differently: a blocked request doesn't use up a token.
+
 ### Token Bucket
 
 Best for APIs with burst traffic. Tokens refill at a steady rate.
@@ -107,6 +109,12 @@ app.use(gatekeeper({
 ```
 
 If Redis goes down, Gatekeeper **fails open** — requests are allowed through. Your API stays up even if Redis doesn't.
+
+While the connection is lost, requests skip Redis entirely instead of waiting for ioredis to reconnect. If Redis is slow or stops answering, each check gives up after `timeoutMs` (500 ms by default) and the request is allowed:
+
+```typescript
+new RedisStore(redis, { timeoutMs: 200 });
+```
 
 ## Options
 

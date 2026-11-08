@@ -19,6 +19,12 @@ npm run lint          # Lint
 npm run build         # Build
 ```
 
+The RedisStore tests are skipped unless `REDIS_URL` points at a Redis or Valkey server. CI always runs them:
+
+```bash
+REDIS_URL=redis://localhost:6379 npm test
+```
+
 ## Pull Request Process
 
 1. Fork and create a feature branch from `main`
