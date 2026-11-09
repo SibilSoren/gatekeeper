@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking:** while Redis is unavailable, RedisStore now counts in memory on each server instead of allowing every request. Limits still apply during an outage, per server rather than across all of them. Pass `fallback: false` to keep the old behavior.
+- RedisStore logs once when Redis becomes unavailable and once when it's back, instead of a warning on every request.
+
+### Added
+
+- `fallback` option for `RedisStore`: the store to count in while Redis is unavailable (default: a `MemoryStore`), or `false` to allow every request.
+
 ## [1.1.0] - 2026-11-08
 
 ### Fixed
