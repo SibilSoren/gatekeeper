@@ -1,4 +1,5 @@
 import type { Store, WindowResult, TokenBucketResult } from '../types.js';
+import { MemoryStore } from './memory.store.js';
 
 // Lua scripts for atomic Redis operations
 
@@ -97,18 +98,26 @@ export interface RedisStoreOptions {
    * (default: 500). Bounds the latency a slow or unreachable Redis can add.
    */
   timeoutMs?: number;
+  /**
+   * Where to count while Redis is unavailable (default: a MemoryStore).
+   * Limits then apply per server instead of across all of them. Pass
+   * `false` to allow every request until Redis is back.
+   */
+  fallback?: Store | false;
 }
 
 /**
  * Redis-backed store for distributed rate limiting.
  * Uses Lua scripts for atomic operations.
- * Fails open — if Redis errors, requests are allowed.
+ * If Redis is unavailable, counts in memory on this server until it's back.
  */
 export class RedisStore implements Store {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private client: any;
   private connected = false;
   private timeoutMs: number;
+  private fallback: Store | null;
+  private degraded = false;
 
   /**
    * @param client - An ioredis client instance
@@ -117,6 +126,10 @@ export class RedisStore implements Store {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(client: any, options: RedisStoreOptions = {}) {
     this.timeoutMs = options.timeoutMs ?? 500;
+    this.fallback =
+      options.fallback === false
+        ? null
+        : (options.fallback ?? new MemoryStore());
     if (typeof client === 'string') {
       // Dynamically import ioredis
       throw new Error(
@@ -137,8 +150,13 @@ export class RedisStore implements Store {
   }
 
   async increment(key: string, windowMs: number): Promise<WindowResult> {
+    const whileUnavailable = () =>
+      this.useFallback(
+        (store) => store.increment(key, windowMs),
+        () => this.failOpen(windowMs),
+      );
     if (!this.isAvailable()) {
-      return this.failOpen(windowMs);
+      return whileUnavailable();
     }
 
     try {
@@ -148,6 +166,7 @@ export class RedisStore implements Store {
         key,
         windowMs,
       );
+      this.markHealthy();
 
       const count = Number(result[0]);
       const ttl = Number(result[1]);
@@ -155,7 +174,7 @@ export class RedisStore implements Store {
 
       return { count, resetMs };
     } catch {
-      return this.failOpen(windowMs);
+      return whileUnavailable();
     }
   }
 
@@ -163,8 +182,13 @@ export class RedisStore implements Store {
     key: string,
     windowMs: number,
   ): Promise<WindowResult> {
+    const whileUnavailable = () =>
+      this.useFallback(
+        (store) => store.slidingIncrement(key, windowMs),
+        () => this.failOpen(windowMs),
+      );
     if (!this.isAvailable()) {
-      return this.failOpen(windowMs);
+      return whileUnavailable();
     }
 
     try {
@@ -185,12 +209,13 @@ export class RedisStore implements Store {
         now,
         windowStart,
       );
+      this.markHealthy();
 
       // The window resets when the current one ends. The key's TTL can't be
       // used here: it's two windows long so the next window can still read it.
       return { count: Number(result[0]), resetMs: windowStart + windowMs };
     } catch {
-      return this.failOpen(windowMs);
+      return whileUnavailable();
     }
   }
 
@@ -199,8 +224,13 @@ export class RedisStore implements Store {
     capacity: number,
     refillRate: number,
   ): Promise<TokenBucketResult> {
+    const whileUnavailable = () =>
+      this.useFallback(
+        (store) => store.consume(key, capacity, refillRate),
+        () => ({ allowed: true, remaining: capacity, resetMs: Date.now() }),
+      );
     if (!this.isAvailable()) {
-      return { allowed: true, remaining: capacity, resetMs: Date.now() };
+      return whileUnavailable();
     }
 
     try {
@@ -213,6 +243,7 @@ export class RedisStore implements Store {
         refillRate,
         now,
       );
+      this.markHealthy();
 
       const allowed = Number(result[0]) === 1;
       const remaining = Number(result[1]);
@@ -224,11 +255,12 @@ export class RedisStore implements Store {
         resetMs: Date.now() + waitMs,
       };
     } catch {
-      return { allowed: true, remaining: capacity, resetMs: Date.now() };
+      return whileUnavailable();
     }
   }
 
   async reset(key: string): Promise<void> {
+    await this.fallback?.reset(key);
     if (!this.isAvailable()) return;
 
     try {
@@ -243,10 +275,37 @@ export class RedisStore implements Store {
   }
 
   async close(): Promise<void> {
+    await this.fallback?.close();
     if (this.client && typeof this.client.quit === 'function') {
       await this.client.quit();
     }
     this.connected = false;
+  }
+
+  /**
+   * Count in the fallback store while Redis is unavailable, or allow the
+   * request when there is none. Logs once per outage, not once per request.
+   */
+  private async useFallback<T>(
+    countInFallback: (store: Store) => Promise<T>,
+    allow: () => T,
+  ): Promise<T> {
+    if (!this.degraded) {
+      this.degraded = true;
+      console.warn(
+        this.fallback
+          ? '[gatekeeper] Redis unavailable — counting in memory on this server until it is back'
+          : '[gatekeeper] Redis unavailable — allowing requests until it is back',
+      );
+    }
+    return this.fallback ? countInFallback(this.fallback) : allow();
+  }
+
+  private markHealthy(): void {
+    if (this.degraded) {
+      this.degraded = false;
+      console.warn('[gatekeeper] Redis is back — counting in Redis again');
+    }
   }
 
   /**
@@ -287,9 +346,6 @@ export class RedisStore implements Store {
    * Fail open — allow the request when Redis is unavailable.
    */
   private failOpen(windowMs: number): WindowResult {
-    console.warn(
-      '[gatekeeper] Redis unavailable — failing open (allowing request)',
-    );
     return { count: 0, resetMs: Date.now() + windowMs };
   }
 }
