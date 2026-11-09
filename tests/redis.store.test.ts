@@ -138,31 +138,90 @@ describe.skipIf(!REDIS_URL)('RedisStore with a real Redis', () => {
       client.disconnect();
     }
   }, 30_000);
+
+  it('keeps limiting in memory after Redis goes away mid-run', async () => {
+    const proxy = await startProxy(new URL(REDIS_URL!));
+    const client = new Redis(proxy.url);
+    const app = createApp(new RedisStore(client), {
+      algorithm: 'fixed-window',
+      limit: 3,
+      window: '1m',
+      prefix: freshPrefix(),
+    });
+
+    try {
+      expect((await request(app).get('/test')).status).toBe(200);
+      await proxy.kill();
+
+      expect(await statusesOf(app, 4)).toEqual([200, 200, 200, 429]);
+    } finally {
+      client.disconnect();
+    }
+  }, 30_000);
+
+  it('goes back to counting in Redis once it recovers', async () => {
+    const proxy = await startProxy(new URL(REDIS_URL!));
+    const client = new Redis(proxy.url);
+    const reader = new Redis(REDIS_URL!);
+    const prefix = freshPrefix();
+    const app = createApp(new RedisStore(client), {
+      algorithm: 'fixed-window',
+      limit: 10,
+      window: '1m',
+      prefix,
+      keyGenerator: () => 'client',
+    });
+
+    try {
+      await request(app).get('/test');
+      await proxy.kill();
+      await request(app).get('/test');
+      await proxy.restart();
+      await waitFor(() => client.status === 'ready');
+      await request(app).get('/test');
+
+      // The request during the outage was counted in memory, not in Redis.
+      expect(await reader.get(`${prefix}client`)).toBe('2');
+    } finally {
+      client.disconnect();
+      reader.disconnect();
+    }
+  }, 30_000);
 });
 
 /**
- * A TCP proxy in front of Redis that a test can cut, to simulate Redis dying
- * while the app is running without touching the real server.
+ * A TCP proxy in front of Redis that a test can cut and bring back, to simulate
+ * Redis dying and recovering while the app is running, without touching the
+ * real server.
  */
-async function startProxy(
-  target: URL,
-): Promise<{ url: string; kill: () => Promise<void> }> {
+async function startProxy(target: URL): Promise<{
+  url: string;
+  kill: () => Promise<void>;
+  restart: () => Promise<void>;
+}> {
   const sockets = new Set<Socket>();
-  const server: Server = createServer((inbound) => {
-    const upstream = connect(Number(target.port || 6379), target.hostname);
-    sockets.add(inbound);
-    sockets.add(upstream);
-    inbound.pipe(upstream).pipe(inbound);
-    const drop = () => {
-      inbound.destroy();
-      upstream.destroy();
-    };
-    inbound.on('error', drop);
-    upstream.on('error', drop);
-    inbound.on('close', drop);
-    upstream.on('close', drop);
-  });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const listen = async (port: number): Promise<Server> => {
+    const server = createServer((inbound) => {
+      const upstream = connect(Number(target.port || 6379), target.hostname);
+      sockets.add(inbound);
+      sockets.add(upstream);
+      inbound.pipe(upstream).pipe(inbound);
+      const drop = () => {
+        inbound.destroy();
+        upstream.destroy();
+      };
+      inbound.on('error', drop);
+      upstream.on('error', drop);
+      inbound.on('close', drop);
+      upstream.on('close', drop);
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(port, '127.0.0.1', resolve),
+    );
+    return server;
+  };
+
+  let server = await listen(0);
   const { port } = server.address() as AddressInfo;
 
   return {
@@ -170,12 +229,71 @@ async function startProxy(
     kill: () =>
       new Promise<void>((resolve) => {
         for (const s of sockets) s.destroy();
+        sockets.clear();
         server.close(() => resolve());
       }),
+    restart: async () => {
+      server = await listen(port);
+    },
   };
 }
 
+async function waitFor(check: () => boolean, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!check()) {
+    if (Date.now() > deadline) throw new Error('Condition not met in time');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+async function statusesOf(app: express.Express, count: number) {
+  const statuses: number[] = [];
+  for (let i = 0; i < count; i++) {
+    statuses.push((await request(app).get('/test')).status);
+  }
+  return statuses;
+}
+
 describe('RedisStore when Redis is unreachable', () => {
+  it.each([
+    { algorithm: 'fixed-window', limit: 2, window: '1m' },
+    { algorithm: 'sliding-window', limit: 2, window: '1m' },
+    { algorithm: 'token-bucket', capacity: 2, refillRate: 0.001 },
+  ] as const)(
+    '$algorithm: keeps limiting in memory on this server',
+    async (opts) => {
+      // Nothing listens on port 1, so every connection attempt is refused.
+      const client = new Redis('redis://127.0.0.1:1');
+      const app = createApp(new RedisStore(client), {
+        ...opts,
+        prefix: freshPrefix(),
+      });
+
+      try {
+        expect(await statusesOf(app, 3)).toEqual([200, 200, 429]);
+      } finally {
+        client.disconnect();
+      }
+    },
+    30_000,
+  );
+
+  it('allows every request with fallback: false', async () => {
+    const client = new Redis('redis://127.0.0.1:1');
+    const app = createApp(new RedisStore(client, { fallback: false }), {
+      algorithm: 'fixed-window',
+      limit: 1,
+      window: '1m',
+      prefix: freshPrefix(),
+    });
+
+    try {
+      expect(await statusesOf(app, 3)).toEqual([200, 200, 200]);
+    } finally {
+      client.disconnect();
+    }
+  }, 30_000);
+
   it('gives up on a Redis that accepts the connection but never answers', async () => {
     // Accepts TCP connections and never replies, like an overloaded server.
     const sockets = new Set<Socket>();
