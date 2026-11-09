@@ -13,7 +13,7 @@ Production-grade, Redis-backed API rate limiting middleware for Express.
 - ⚡ **3 algorithms** — Fixed Window, Sliding Window Counter, Token Bucket
 - 🔴 **Redis-backed** — Distributed rate limiting across multiple servers
 - 💾 **In-memory fallback** — Zero-config for development and single-server
-- 🛡️ **Fail-open** — If Redis goes down, requests are allowed (not blocked)
+- 🛡️ **Survives Redis outages** — If Redis goes down, limits keep working in memory on each server, and your API stays up
 - 📊 **Standard headers** — `X-RateLimit-*` and `Retry-After` out of the box
 - 🎯 **Flexible keys** — Rate limit by IP, API key, user ID, or custom function
 - 🪶 **Tiny** — Zero runtime dependencies (ioredis is an optional peer dep)
@@ -108,12 +108,15 @@ app.use(gatekeeper({
 }));
 ```
 
-If Redis goes down, Gatekeeper **fails open** — requests are allowed through. Your API stays up even if Redis doesn't.
+If Redis goes down, Gatekeeper keeps counting in memory on each server until Redis is back, so your API stays up and limits still apply. They apply per server during the outage: with 3 servers and a limit of 100, a client can get up to 300 requests through. When Redis recovers, counting moves back to Redis on its own. Gatekeeper logs once when an outage starts and once when it ends.
 
-While the connection is lost, requests skip Redis entirely instead of waiting for ioredis to reconnect. If Redis is slow or stops answering, each check gives up after `timeoutMs` (500 ms by default) and the request is allowed:
+While the connection is lost, requests skip Redis entirely instead of waiting for ioredis to reconnect. If Redis is slow or stops answering, each check gives up after `timeoutMs` (500 ms by default) and counts in memory instead.
 
 ```typescript
 new RedisStore(redis, { timeoutMs: 200 });
+
+// Allow every request while Redis is down, instead of counting in memory:
+new RedisStore(redis, { fallback: false });
 ```
 
 ## Options
