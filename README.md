@@ -93,7 +93,7 @@ app.use(gatekeeper({
 
 ## Redis Store (Distributed)
 
-For multi-server deployments, use the Redis store:
+For multi-server deployments, use the Redis store. It needs Redis 5 or later, or Valkey.
 
 ```typescript
 import { gatekeeper, RedisStore } from '@sibilsoren/gatekeeper';

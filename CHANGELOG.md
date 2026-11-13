@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- `reset(key)` also deleted the counters of every key that started with `key`, such as `gk:1.2.3.45` when resetting `gk:1.2.3.4`. Both stores now delete only that key's own counters.
+- RedisStore: `reset()` uses `SCAN` instead of `KEYS`, which blocked Redis while it checked every key.
+- RedisStore: the token bucket uses Redis's clock instead of the app server's. When servers' clocks disagreed, a fast one handed out tokens early and a slow one took them away. This needs Redis 5 or later, or Valkey.
+
+### Added
+
+- `@sibilsoren/gatekeeper/package.json` can be imported, for tools that read the installed version.
+
 ## [2.0.0] - 2026-11-09
 
 ### Changed
