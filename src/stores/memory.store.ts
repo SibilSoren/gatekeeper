@@ -1,4 +1,5 @@
 import type { Store, WindowResult, TokenBucketResult } from '../types.js';
+import { isOwnKey } from '../utils/store-keys.js';
 
 interface WindowEntry {
   count: number;
@@ -133,9 +134,9 @@ export class MemoryStore implements Store {
   }
 
   async reset(key: string): Promise<void> {
-    // Remove all entries matching this key prefix
+    // Window counters are stored as key:<window number>
     for (const k of this.windows.keys()) {
-      if (k.startsWith(key)) {
+      if (isOwnKey(k, key)) {
         this.windows.delete(k);
       }
     }
