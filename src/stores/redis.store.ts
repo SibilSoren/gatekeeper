@@ -55,7 +55,10 @@ const TOKEN_BUCKET_SCRIPT = `
 local key = KEYS[1]
 local capacity = tonumber(ARGV[1])
 local refill_rate = tonumber(ARGV[2])
-local now = tonumber(ARGV[3])
+
+-- Redis's clock, so app servers whose clocks disagree refill at the same rate
+local time = redis.call('TIME')
+local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
 
 local bucket = redis.call('HMGET', key, 'tokens', 'last_refill')
 local tokens = tonumber(bucket[1])
@@ -67,8 +70,9 @@ if tokens == nil then
   last_refill = now
 end
 
--- Refill tokens
-local elapsed = (now - last_refill) / 1000
+-- Refill tokens. A last_refill ahead of now (written by an older version
+-- using a fast app-server clock) adds nothing instead of taking tokens away.
+local elapsed = math.max(0, now - last_refill) / 1000
 local tokens_to_add = elapsed * refill_rate
 tokens = math.min(capacity, tokens + tokens_to_add)
 
@@ -235,14 +239,12 @@ export class RedisStore implements Store {
     }
 
     try {
-      const now = Date.now();
       const result = await this.evalWithTimeout(
         TOKEN_BUCKET_SCRIPT,
         1,
         key,
         capacity,
         refillRate,
-        now,
       );
       this.markHealthy();
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, afterAll } from 'vitest';
+import { describe, it, expect, afterAll, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import { Redis } from 'ioredis';
@@ -164,6 +164,36 @@ describe.skipIf(!REDIS_URL)('RedisStore with a real Redis', () => {
         0,
       );
       expect(await raw.exists(`${p}other:0`, `${p}other:4999`)).toBe(2);
+    } finally {
+      raw.disconnect();
+    }
+  });
+
+  it("token-bucket: refills by Redis's clock, not the app server's", async () => {
+    const store = newStore();
+    const key = `${freshPrefix()}bucket`;
+    // Two tokens, one more a minute: nothing refills while the test runs.
+    expect((await store.consume(key, 2, 1 / 60)).allowed).toBe(true);
+    expect((await store.consume(key, 2, 1 / 60)).allowed).toBe(true);
+
+    // The next request lands on a server whose clock is 10 minutes ahead.
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 10 * 60_000 });
+    try {
+      expect((await store.consume(key, 2, 1 / 60)).allowed).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('token-bucket: a last refill time in the future takes no tokens away', async () => {
+    const store = newStore();
+    const raw = new Redis(REDIS_URL!);
+    const key = `${freshPrefix()}bucket`;
+    try {
+      // What a server with a fast clock could have written before this fix.
+      await raw.hset(key, 'tokens', 2, 'last_refill', Date.now() + 60_000);
+      const result = await store.consume(key, 2, 1 / 60);
+      expect(result).toMatchObject({ allowed: true, remaining: 1 });
     } finally {
       raw.disconnect();
     }
