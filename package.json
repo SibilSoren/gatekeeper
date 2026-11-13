@@ -1,6 +1,6 @@
 {
   "name": "@sibilsoren/gatekeeper",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Production-grade, Redis-backed API rate limiting middleware for Express",
   "type": "module",
   "main": "./dist/index.cjs",
