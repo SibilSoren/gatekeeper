@@ -114,6 +114,61 @@ describe.skipIf(!REDIS_URL)('RedisStore with a real Redis', () => {
     },
   );
 
+  it('reset clears the key and leaves keys that start the same way', async () => {
+    const store = newStore();
+    const p = freshPrefix();
+    // `*` and `[` are glob characters in a Redis pattern.
+    const pairs = [
+      [`${p}1.2.3.4`, `${p}1.2.3.45`],
+      [`${p}user*`, `${p}user-b`],
+      [`${p}[a]`, `${p}a`],
+    ];
+
+    for (const [target, other] of pairs) {
+      for (const key of [target, other]) {
+        await store.slidingIncrement(key, 60_000);
+        await store.slidingIncrement(key, 60_000);
+      }
+      await store.reset(target);
+      expect((await store.slidingIncrement(target, 60_000)).count).toBe(1);
+      expect((await store.slidingIncrement(other, 60_000)).count).toBe(3);
+    }
+
+    const fixed = `${p}fixed`;
+    await store.increment(fixed, 60_000);
+    await store.reset(fixed);
+    expect((await store.increment(fixed, 60_000)).count).toBe(1);
+
+    const bucket = `${p}bucket`;
+    await store.consume(bucket, 3, 0.001);
+    await store.reset(bucket);
+    expect((await store.consume(bucket, 3, 0.001)).remaining).toBe(2);
+  });
+
+  it('reset finds the key among thousands of others', async () => {
+    const store = newStore();
+    const raw = new Redis(REDIS_URL!);
+    const p = freshPrefix();
+    const key = `${p}target`;
+    const window = Math.floor(Date.now() / 60_000);
+    try {
+      const pipeline = raw.pipeline();
+      for (let i = 0; i < 5_000; i++) pipeline.set(`${p}other:${i}`, 1);
+      pipeline.set(`${key}:${window - 1}`, 5);
+      pipeline.set(`${key}:${window}`, 5);
+      await pipeline.exec();
+
+      await store.reset(key);
+
+      expect(await raw.exists(`${key}:${window - 1}`, `${key}:${window}`)).toBe(
+        0,
+      );
+      expect(await raw.exists(`${p}other:0`, `${p}other:4999`)).toBe(2);
+    } finally {
+      raw.disconnect();
+    }
+  });
+
   it('fails open without making requests wait when Redis goes away mid-run', async () => {
     const proxy = await startProxy(new URL(REDIS_URL!));
     const client = new Redis(proxy.url);

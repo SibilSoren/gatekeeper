@@ -1,5 +1,6 @@
 import type { Store, WindowResult, TokenBucketResult } from '../types.js';
 import { MemoryStore } from './memory.store.js';
+import { escapeGlob, isOwnKey } from '../utils/store-keys.js';
 
 // Lua scripts for atomic Redis operations
 
@@ -264,11 +265,24 @@ export class RedisStore implements Store {
     if (!this.isAvailable()) return;
 
     try {
-      // Find and delete all keys matching the pattern
-      const keys = await this.client.keys(`${key}*`);
-      if (keys.length > 0) {
-        await this.client.del(...keys);
-      }
+      // The key itself (fixed window, token bucket) and key:<window number>
+      // (sliding window). SCAN walks the keyspace in batches; KEYS would block
+      // Redis until it had checked every key.
+      const keys = [key];
+      const pattern = `${escapeGlob(key)}:[0-9]*`;
+      let cursor = '0';
+      do {
+        const [next, batch]: [string, string[]] = await this.client.scan(
+          cursor,
+          'MATCH',
+          pattern,
+          'COUNT',
+          1000,
+        );
+        cursor = next;
+        keys.push(...batch.filter((k) => isOwnKey(k, key)));
+      } while (cursor !== '0');
+      await this.client.del(...keys);
     } catch {
       // Fail silently
     }

@@ -316,4 +316,15 @@ describe('MemoryStore', () => {
     const result = await store.increment('test', 60_000);
     expect(result.count).toBe(1);
   });
+
+  it('should reset only the given key, not keys that start with it', async () => {
+    for (const key of ['gk:1.2.3.4', 'gk:1.2.3.45']) {
+      await store.increment(key, 60_000);
+      await store.increment(key, 60_000);
+    }
+    await store.reset('gk:1.2.3.4');
+
+    expect((await store.increment('gk:1.2.3.4', 60_000)).count).toBe(1);
+    expect((await store.increment('gk:1.2.3.45', 60_000)).count).toBe(3);
+  });
 });
